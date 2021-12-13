@@ -4,7 +4,7 @@ Library for Telnet serial communication to Extron Media Switchers.
 See below for exactly which amplifier models are supported.
 
 ![beta_badge](https://img.shields.io/badge/maturity-Beta-yellow.png)
-#[![PyPi](https://img.shields.io/pypi/v/pyxantech.svg)](https://pypi.python.org/pypi/pyxantech)
+[![PyPi](https://img.shields.io/pypi/v/pyextron.svg)](https://pypi.python.org/pypi/pyextron)
 [![MIT license](http://img.shields.io/badge/license-MIT-brightgreen.svg)](http://opensource.org/licenses/MIT)
 
 ## Usage
