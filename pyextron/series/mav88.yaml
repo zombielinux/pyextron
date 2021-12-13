@@ -1,0 +1,50 @@
+- series: mav88
+  name: "Extron MAV+88 Audio and Video Switcher"
+
+  supported:
+    - manufacturer: "Extron"
+      model: "MAV88"
+
+  features:
+    zones: 8
+    sources: 8
+
+  # FIXME: switch code to features
+  num_zones: 8
+  num_sources: 8
+  max_amps: 1
+  
+  # FIXME: load these limits from protocol
+  max_balance: 20
+  max_bass: 14
+  max_treble: 14
+  max_volume: 38
+
+  protocol: mav88
+  min_time_between_commands: 0.4
+
+  telnet:
+    write_timeout: 1.0
+ 
+  hardware_volume_steps: 64
+ 
+  sources:
+    1: "Source 1"
+    2: "Source 2"
+    3: "Source 3"
+    4: "Source 4"
+    5: "Source 5"
+    6: "Source 6"
+    7: "Source 7"
+    8: "Source 8"
+ 
+  # technically zone = {amp_number}{zone_num_within_amp_1-6} (e.g. 11 = amp number 1, zone 1)
+  zones:
+    1: "Zone 1"          # main amp 1    (e.g. 15 = amp 1, zone 5)
+    2: "Zone 2"
+    3: "Zone 3"
+    4: "Zone 4"
+    5: "Zone 5"
+    6: "Zone 6"
+    7: "Zone 7"
+    8: "Zone 8"
