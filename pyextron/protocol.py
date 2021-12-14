@@ -18,5 +18,5 @@ MINUTES = 300
 
 def get_telnet_protocol(fqdn, config, protocol_config, loop):
 
-
-    # check if connected, and abort calling provided method if no connection before timeou
+	LOG.debug('Got into get_telnet_protocol')	
+	# check if connected, and abort calling provided method if no connection before timeout

@@ -3,7 +3,7 @@ import logging
 import re
 import time
 import serial
-import telnet
+from telnetlib import Telnet
 
 from functools import wraps
 from threading import RLock
@@ -18,10 +18,12 @@ SUPPORTED_AMP_TYPES = DEVICE_CONFIG.keys()
 #CONF_SERIAL_CONFIG='rs232'
 
 def get_device_config(amp_type, key):
+#    print(amp_type, key)
     return get_with_log(amp_type, DEVICE_CONFIG[amp_type], key)
 
 def get_protocol_config(amp_type, key):
     protocol = get_device_config(amp_type, 'protocol')
+#    print(protocol, key, PROTOCOL_CONFIG[protocol].get(key))
     return PROTOCOL_CONFIG[protocol].get(key)
 
 # FIXME: populate based on dictionary, not positional
@@ -105,7 +107,6 @@ def _command(amp_type: str, format_code: str, args = {}):
 
     rs232_commands = get_protocol_config(amp_type, 'commands')
     command = rs232_commands.get(format_code) + cmd_separator + cmd_eol
-
     return command.format(**args).encode('ascii')
 
 def _zone_status_cmd(amp_type, zone: int) -> bytes:
@@ -134,11 +135,10 @@ def _set_source_cmd(amp_type, zone: int, source: int) -> bytes:
     LOG.info(f"Setting source {amp_type} zone {zone} to {source}")
     return _command(amp_type, 'set_source', args = { 'zone': zone, 'source': source })
 
-def get_amp_controller(amp_type: str, port_url, serial_config_overrides={}):
+def get_amp_controller(amp_type: str, port_url):
     """
     Return synchronous version of amplifier control interface
-    :param port_url: serial port, i.e. '/dev/ttyUSB0'
-    :param serial_config_overrides: dictionary of serial port configuration overrides (e.g. baudrate)
+    :param port_url:  DNS name or IP address of the matrix device , i.e. 'extron.fqdn.tld'
     :return: synchronous implementation of amplifier control interface
     """
 
@@ -158,54 +158,64 @@ def get_amp_controller(amp_type: str, port_url, serial_config_overrides={}):
 
 
     class AmpControlSync(AmpControlBase):
-        def __init__(self, amp_type, port_url, serial_config_overrides):
+        def __init__(self, amp_type, port_url):
             self._amp_type = amp_type
             config = DEVICE_CONFIG[amp_type]
 
             # allow overriding the default serial port configuration, in case the user has changed
             # settings on their amplifier (e.g. increased the default baudrate)
-            serial_config = get_device_config(amp_type, CONF_SERIAL_CONFIG)
-            if serial_config_overrides:
-                LOG.debug(f"Overiding serial port config for {port_url}: {serial_config_overrides}")
-                serial_config.update(serial_config_overrides)
 
-            self._port = serial.serial_for_url(port_url, **serial_config)
+            self._port = Telnet(port_url)
+            self._port.open(port_url)
+            login_string='\r\n'
+            self._port.write(login_string.encode('ascii'))
+            #Done 3 times to clear out initial messages in telnet connection
+            self._port.read_until(login_string.encode('ascii'))
+            self._port.read_until(login_string.encode('ascii'))
+            self._port.read_until(login_string.encode('ascii'))
+            
+        def _send_request(self, request, skip=0):
 
-        def _send_request(self, request: bytes, skip=0):
             """
             :param request: request that is sent to the xantech
             :param skip: number of bytes to skip for end of transmission decoding
             :return: ascii string returned by xantech
             """
             # clear
-            self._port.reset_output_buffer()
-            self._port.reset_input_buffer()
+#            self._port.reset_output_buffer()
+#            self._port.reset_input_buffer()
 
-            #print(f"Sending:  {request}")
+#            print(f"Sending:  {request}")
             LOG.debug(f"Sending:  {request}")
 
             # send
+#            print(request.decode('ascii'))
             self._port.write(request)
-            self._port.flush()
+#            self._port.flush()
 
-            response_eol = get_protocol_config(amp_type, CONF_RESPONSE_EOL)
+            response_eol = get_protocol_config(amp_type, CONF_RESPONSE_EOL).encode('ascii')
             len_eol = len(response_eol)
 
             # receive
             result = bytearray()
             while True:
-                c = self._port.read(1)
-                #print(c)
+                login_string='64\r\n'
+#               c = self._port.read_until(login_string.encode('ascii'))
+                c = self._port.read_very_eager()
+#                print(c)
                 if not c:
                     ret = bytes(result)
                     LOG.info(result)
-                    raise serial.SerialTimeoutException(
-                        'Connection timed out! Last received bytes {}'.format([hex(a) for a in result]))
+                    LOG.info("Connection Timed Out")
+#                   raise serial.SerialTimeoutException(
+#                        'Connection timed out! Last received bytes {}'.format([hex(a) for a in result]))
                 result += c
                 if len(result) > skip and result[-len_eol:] == response_eol:
                     break
-
-            ret = bytes(result)
+                    
+#            print(result)                    
+#            ret = bytes(result)
+            ret = result
             LOG.debug('Received "%s"', ret)
 #            print(f"Received: {ret}")
             return ret.decode('ascii')
@@ -247,28 +257,12 @@ def get_amp_controller(amp_type: str, port_url, serial_config_overrides={}):
                 return None
 
         @synchronized
-        def set_power(self, zone: int, power: bool):
-            self._send_request(_set_power_cmd(self._amp_type, zone, power))
-
-        @synchronized
         def set_mute(self, zone: int, mute: bool):
             self._send_request(_set_mute_cmd(self._amp_type, zone, mute))
-
+            
         @synchronized
         def set_volume(self, zone: int, volume: int):
             self._send_request(_set_volume_cmd(self._amp_type, zone, volume))
-
-        @synchronized
-        def set_treble(self, zone: int, treble: int):
-            self._send_request(_set_treble_cmd(self._amp_type, zone, treble))
-
-        @synchronized
-        def set_bass(self, zone: int, bass: int):
-            self._send_request(_set_bass_cmd(self._amp_type, zone, bass))
-
-        @synchronized
-        def set_balance(self, zone: int, balance: int):
-            self._send_request(_set_balance_cmd(self._amp_type, zone, balance))
 
         @synchronized
         def set_source(self, zone: int, source: int):
@@ -295,7 +289,7 @@ def get_amp_controller(amp_type: str, port_url, serial_config_overrides={}):
                     LOG.warning(f"Failed restoring zone {zone} command {command}")
                 time.sleep(0.1) # pause 100 ms
 
-    return AmpControlSync(amp_type, port_url, serial_config_overrides)
+    return AmpControlSync(amp_type, port_url)
 
 async def async_get_amp_controller(amp_type, port_url, loop, serial_config_overrides={}):
     """
