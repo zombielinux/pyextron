@@ -10,6 +10,7 @@ from threading import RLock
 
 from .config import (DEVICE_CONFIG, PROTOCOL_CONFIG, RS232_RESPONSE_PATTERNS, get_with_log, pattern_to_dictionary)
 from .protocol import get_telnet_protocol, CONF_RESPONSE_EOL, CONF_COMMAND_EOL, CONF_COMMAND_SEPARATOR
+from .protocol import async_get_telnet_protocol, CONF_RESPONSE_EOL, CONF_COMMAND_EOL, CONF_COMMAND_SEPARATOR
 
 LOG = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ def _command(amp_type: str, format_code: str, args = {}):
 
     rs232_commands = get_protocol_config(amp_type, 'commands')
     command = rs232_commands.get(format_code) + cmd_separator + cmd_eol
+    
     return command.format(**args).encode('ascii')
 
 def _zone_status_cmd(amp_type, zone: int) -> bytes:
@@ -175,7 +177,6 @@ def get_amp_controller(amp_type: str, port_url):
             self._port.read_until(login_string.encode('ascii'))
             
         def _send_request(self, request, skip=0):
-
             """
             :param request: request that is sent to the xantech
             :param skip: number of bytes to skip for end of transmission decoding
@@ -291,130 +292,4 @@ def get_amp_controller(amp_type: str, port_url):
 
     return AmpControlSync(amp_type, port_url)
 
-async def async_get_amp_controller(amp_type, port_url, loop, serial_config_overrides={}):
-    """
-    Return asynchronous version of amplifier control interface
-    :param port_url: serial port, i.e. '/dev/ttyUSB0'
-    :return: asynchronous implementation of amplifier control interface
-    """
 
-    # sanity check the provided amplifier type
-    if amp_type not in SUPPORTED_AMP_TYPES:
-        LOG.error("Unsupported amplifier type '%s'", amp_type)
-        return None
-
-    lock = asyncio.Lock()
-
-    def locked_coro(coro):
-        @wraps(coro)
-        async def wrapper(*args, **kwargs):
-            async with lock:
-                return (await coro(*args, **kwargs))
-        return wrapper
-
-    class AmpControlAsync(AmpControlBase):
-        def __init__(self, amp_type, serial_config, protocol):
-            self._amp_type = amp_type
-            self._serial_config = serial_config
-            self._protocol = protocol
-
-        @locked_coro
-        async def _zone_status_manual(self, zone: int):
-            status = {}
-            responses = get_protocol_config(amp_type, 'responses')
-
-            # send all the commands necessary to restore the various status settings to the amp
-            for command in get_protocol_config(amp_type, 'zone_status_commands'):
-                pattern = responses[command]
-                result = await self._protocol._send( _command(amp_type, command) )
-
-                # parse the result into status dictionary
-                LOG.info(f"Received zone stats {result}, matching to {pattern}")
-                match = re.search(pattern, result)
-                if match:
-                    status.copy(match.groupdict())
-                else:
-                    LOG.warning("Could not pattern match zone status '%s' with '%s'", result, pattern)
-                await asyncio.sleep(0.1) # pause 100 ms
-
-            return status
-
-        @locked_coro
-        async def zone_status(self, zone: int):
-            # FIXME: this has nothing to do with amp_type?  protocol!     
-       
-            # if there is a list of zone status commands, execute that (some don't have a single command for status)
-            #if get_protocol_config(amp_type, 'zone_status_commands'):
-            #    return await self._zone_status_manual(zone)
-
-            cmd = _zone_status_cmd(self._amp_type, zone)
-            status_string = await self._protocol.send(cmd)
-
-            status = ZoneStatus.from_string(self._amp_type, status_string)
-            LOG.debug("Status: %s (string: %s)", status, status_string)
-            if status:
-                return status.dict
-            else:
-                return None
-
-        @locked_coro
-        async def set_power(self, zone: int, power: bool):
-            await self._protocol.send(_set_power_cmd(self._amp_type, zone, power))
-
-        @locked_coro
-        async def set_mute(self, zone: int, mute: bool):
-            await self._protocol.send(_set_mute_cmd(self._amp_type, zone, mute))
-
-        @locked_coro
-        async def set_volume(self, zone: int, volume: int):
-            await self._protocol.send(_set_volume_cmd(self._amp_type, zone, volume))
-
-        @locked_coro
-        async def set_treble(self, zone: int, treble: int):
-            await self._protocol.send(_set_treble_cmd(self._amp_type, zone, treble))
-
-        @locked_coro
-        async def set_bass(self, zone: int, bass: int):
-            await self._protocol.send(_set_bass_cmd(self._amp_type, zone, bass))
-
-        @locked_coro
-        async def set_balance(self, zone: int, balance: int):
-            await self._protocol.send(_set_balance_cmd(self._amp_type, zone, balance))
-
-        @locked_coro
-        async def set_source(self, zone: int, source: int):
-            await self._protocol.send(_set_source_cmd(self._amp_type, zone, source))
-
-        @locked_coro
-        async def all_off(self):
-            await self._protocol.send(_command(self._amp_type, 'all_zones_off'))
-
-        @locked_coro
-        async def restore_zone(self, status: dict):
-            zone = status['zone']
-            amp_type = self._amp_type
-            success = get_protocol_config(amp_type, 'restore_success')
-            #LOG.debug(f"Restoring amp {amp_type} zone {zone} from {status}")
-
-            # send all the commands necessary to restore the various status settings to the amp
-            restore_commands = get_protocol_config(amp_type, 'restore_zone')
-            for command in restore_commands:
-                result = await self._protocol._send( _command(amp_type, command, status) )
-                if result != success:
-                    LOG.warning(f"Failed restoring zone {zone} command {command}")
-                await asyncio.sleep(0.1) # pause 100 ms
-
-    protocol = get_device_config(amp_type, 'protocol')
-    protocol_config = PROTOCOL_CONFIG[protocol]
-
-    # allow overriding the default serial port configuration, in case the user has changed
-    # settings on their amplifier (e.g. increased the default baudrate)
-    serial_config = get_device_config(amp_type, CONF_SERIAL_CONFIG)
-    if serial_config_overrides:
-        LOG.debug(f"Overiding serial port config for {port_url}: {serial_config_overrides}")
-        serial_config.update(serial_config_overrides)
-
-
-    LOG.debug(f"Loading amp {amp_type}/{protocol}: {serial_config}, {protocol_config}")
-    protocol = await async_get_rs232_protocol(port_url, DEVICE_CONFIG[amp_type], serial_config, protocol_config, loop)
-    return AmpControlAsync(amp_type, serial_config, protocol)

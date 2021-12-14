@@ -2,7 +2,7 @@
 #
 # Running:
 #   ./example-async.py --help
-#   ./example.py --tty /dev/tty.usbserial-A501SGSZ
+#   ./example.py --host extron.fqdn.tld --model mav88
 
 import argparse                                                                                             
 import time
