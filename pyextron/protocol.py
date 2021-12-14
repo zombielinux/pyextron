@@ -3,7 +3,6 @@ import logging
 import time
 import asyncio
 import functools
-import anyio, asynctelnet
 from ratelimit import limits
 
 LOG = logging.getLogger(__name__)
